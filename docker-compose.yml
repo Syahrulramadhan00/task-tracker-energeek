@@ -1,0 +1,89 @@
+services:
+
+  # ─── PostgreSQL Database ───────────────────────────────────────────
+  db:
+    image: postgres:16-alpine
+    container_name: task-tracker-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: task_tracker
+      POSTGRES_USER: tracker_user
+      POSTGRES_PASSWORD: tracker_secret
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tracker_user -d task_tracker"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - tracker-net
+
+  # ─── Laravel API ───────────────────────────────────────────────────
+  api:
+    build:
+      context: ./task-tracker-api
+      dockerfile: Dockerfile
+    container_name: task-tracker-api
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      APP_NAME: TaskTracker
+      APP_ENV: local
+      APP_DEBUG: "true"
+      APP_URL: http://localhost:8000
+      APP_KEY: base64:PLACEHOLDER_WILL_BE_GENERATED_ON_STARTUP
+
+      DB_CONNECTION: pgsql
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_DATABASE: task_tracker
+      DB_USERNAME: tracker_user
+      DB_PASSWORD: tracker_secret
+
+      SANCTUM_STATEFUL_DOMAINS: "localhost:5173"
+      SESSION_DRIVER: cookie
+
+      LOG_CHANNEL: stderr
+      LOG_LEVEL: debug
+
+      # Allow CORS from the UI container
+      FRONTEND_URL: http://localhost:5173
+    ports:
+      - "8000:8000"
+    volumes:
+      - api_storage:/var/www/html/storage
+    networks:
+      - tracker-net
+
+  # ─── Vue 3 Frontend ────────────────────────────────────────────────
+  ui:
+    build:
+      context: ./task-tracker-ui
+      dockerfile: Dockerfile
+    container_name: task-tracker-ui
+    restart: unless-stopped
+    depends_on:
+      - api
+    environment:
+      VITE_API_BASE_URL: http://localhost:8000/api
+    ports:
+      - "5173:5173"
+    volumes:
+      # Mount source for hot-reload in dev
+      - ./task-tracker-ui/src:/app/src
+    networks:
+      - tracker-net
+
+# ─── Volumes & Networks ─────────────────────────────────────────────
+volumes:
+  db_data:
+  api_storage:
+
+networks:
+  tracker-net:
+    driver: bridge
